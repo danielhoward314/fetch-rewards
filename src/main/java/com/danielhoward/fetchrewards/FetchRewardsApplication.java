@@ -1,13 +1,18 @@
 package com.danielhoward.fetchrewards;
 
-import org.springframework.boot.SpringApplication;
+import com.danielhoward.config.FetchRewardsApplicationConfiguration;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.annotation.Import;
 
+@Import({
+	FetchRewardsApplicationConfiguration.class
+})
 @SpringBootApplication
 public class FetchRewardsApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(FetchRewardsApplication.class, args);
+		new SpringApplicationBuilder(FetchRewardsApplication.class).build().run(args);
 	}
 
 }

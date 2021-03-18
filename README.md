@@ -15,3 +15,22 @@ sdk install gradle 6.8.3
 ### Run from Command Line
 
 From the root directory, run `./gradlew bootRun`.
+
+### Testing Endpoints
+
+The application exposes the following endpoints:
+
+1. `POST` to URI `/transactions` with JSON request body matching the spec.
+```shell
+curl --header "Content-Type: application/json" --request POST --data '{ "payer": "MILLER COORS", "points": 10000, "timestamp": "2020-11-01T14:00:00Z" }' http://localhost:8080/transactions
+```
+
+2. `POST` to URI `/points` with JSON request body matching the spec. 
+```shell
+curl --header "Content-Type: application/json" --request POST --data '{ "points": 1000 }' http://localhost:8080/points
+```
+
+3. `GET` to URI "/balances"
+```shell
+curl --header "Content-Type: application/json" --request GET http://localhost:8080/balances
+```

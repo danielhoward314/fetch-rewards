@@ -76,6 +76,7 @@ public class PointsService {
                 updatesSoFar.getIndicesToRemove().add(i);
                 updatesSoFar.setPointsSpent(payerPointsUsed);
                 pointsUsageByPayer.put(current.getPayer(), updatesSoFar);
+                pointsToCover = pointsToCover + Math.abs(current.getPoints());
             } else {
                 Long currentBalance = (Long) Optional.ofNullable(balancesCache.get(current.getPayer()))
                     .map(Cache.ValueWrapper::get)
@@ -93,7 +94,7 @@ public class PointsService {
                     pointsToCover = 0L;
                     savedPayerPoints = savedPayerPoints + payerPointsUsed;
                     // Since we will remove the old transaction below, but did not use all of its points
-                    // add a new transaction to account for the difference with the old timestamp.
+                    // add a new transaction to account for the difference, using original timestamp.
                     Long leftOverPts = current.getPoints() - payerPointsUsed;
                     Transaction diffTrx = new Transaction(current.getPayer(), leftOverPts, current.getTimestamp());
                     diffTransactions.add(diffTrx);
@@ -106,14 +107,25 @@ public class PointsService {
                 pointsUsageByPayer.put(current.getPayer(), updatesSoFar);
             }
             if (pointsToCover == 0) {
+                balancesCache.invalidate();
+                pointsUsageByPayer.forEach((payer, ledger) -> {
+                    // Account for case when all transactions for a payer are used.
+                    // Update balance cache with 0, rather than rely on posting unused transactions for balance update.
+                    Integer idxToRmv = ledger.getIndicesToRemove().size();
+                    Integer trxCountForPayer = Math.toIntExact(allTransactions.stream()
+                        .filter(transaction -> transaction.getPayer().equals(payer))
+                        .count());
+                    if (idxToRmv == trxCountForPayer) {
+                        balancesCache.put(payer, 0L);
+                    }
+                });
                 break;
             }
             i++;
         }
 
-        // Invalidate caches, then update by posting un-used transactions.
+        // Invalidate transaction cache, then update by posting unused transactions.
         trxCache.invalidate();
-        balancesCache.invalidate();
         List<Transaction> unUsedTransactions = IntStream.range(0, allTransactions.size())
             .filter(index -> {
                 Transaction trxToCheck = allTransactions.get(index);
@@ -124,7 +136,6 @@ public class PointsService {
         unUsedTransactions.forEach(this::postTransaction);
 
         // Prepare return value based on usage.
-        // Account for case in which only negative transactions were encountered for a payer.
         List<PointsUsageSummary> pointsUsageSummaries = new ArrayList<>();
         pointsUsageByPayer.forEach((key, value) -> {
             if (value.getPointsSpent() > 0) {
@@ -154,8 +165,8 @@ public class PointsService {
         List<Transaction> allTransactions = new ArrayList<>();
         allKeys.forEach(key -> {
             List<Transaction> transactions = (List<Transaction>) Optional.ofNullable(cache.get(key))
-                    .map(Cache.ValueWrapper::get)
-                    .orElse(new ArrayList());
+                .map(Cache.ValueWrapper::get)
+                .orElse(new ArrayList());
             if (!transactions.isEmpty()) {
                 allTransactions.addAll(transactions);
             }

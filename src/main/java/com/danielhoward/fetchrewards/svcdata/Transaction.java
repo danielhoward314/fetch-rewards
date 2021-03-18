@@ -10,6 +10,14 @@ public class Transaction {
 
     LocalDateTime timestamp;
 
+    public Transaction() {}
+
+    public Transaction(String payer, Long points, LocalDateTime timestamp) {
+        this.payer = payer;
+        this.points = points;
+        this.timestamp = timestamp;
+    }
+
     public String getPayer() {
         return payer;
     }

@@ -53,14 +53,15 @@ public class PointsService {
     }
 
     public List<PointsUsageSummary> spendPoints(PointsSpendEntry spendEntry) {
-        List<PointsUsageSummary> pointsUsageSummaries = new ArrayList<>();
         Cache trxCache = cacheManager.getCache(TRANSACTIONS_CACHE);
         Set<Object> allTrxKeys = getAllKeys(TRANSACTIONS_CACHE);
         Cache balancesCache = cacheManager.getCache(BALANCES_CACHE);
         // Merges all payer transactions into sorted list to enforce earliest timestamp rule.
         List<Transaction> allTransactions = getAllTransactionsSorted(trxCache, allTrxKeys);
         Long pointsToCover = spendEntry.getPoints();
+        // Intermediate data structure that will be used to prepare return value.
         Map<String, UpdateLedger> pointsUsageByPayer = new HashMap<>();
+        List<Transaction> diffTransactions = new ArrayList<>();
         int i = 0;
         while (i < allTransactions.size()) {
             Transaction current = allTransactions.get(i);
@@ -91,16 +92,18 @@ public class PointsService {
                     payerPointsUsed = ptsAvailable - Math.abs(pointsToCover - ptsAvailable);
                     pointsToCover = 0L;
                     savedPayerPoints = savedPayerPoints + payerPointsUsed;
-                    updatesSoFar.getIndicesToRemove().add(i);
-                    updatesSoFar.setPointsSpent(savedPayerPoints);
-                    pointsUsageByPayer.put(current.getPayer(), updatesSoFar);
+                    // Since we will remove the old transaction below, but did not use all of its points
+                    // add a new transaction to account for the difference with the old timestamp.
+                    Long leftOverPts = current.getPoints() - payerPointsUsed;
+                    Transaction diffTrx = new Transaction(current.getPayer(), leftOverPts, current.getTimestamp());
+                    diffTransactions.add(diffTrx);
                 } else {
                     pointsToCover = pointsToCover - ptsAvailable;
                     savedPayerPoints = savedPayerPoints + ptsAvailable;
-                    updatesSoFar.getIndicesToRemove().add(i);
-                    updatesSoFar.setPointsSpent(savedPayerPoints);
-                    pointsUsageByPayer.put(current.getPayer(), updatesSoFar);
                 }
+                updatesSoFar.getIndicesToRemove().add(i);
+                updatesSoFar.setPointsSpent(savedPayerPoints);
+                pointsUsageByPayer.put(current.getPayer(), updatesSoFar);
             }
             if (pointsToCover == 0) {
                 break;
@@ -117,10 +120,12 @@ public class PointsService {
                 return !pointsUsageByPayer.get(trxToCheck.getPayer()).getIndicesToRemove().contains(index);
             }).mapToObj(allTransactions::get)
             .collect(Collectors.toList());
+        unUsedTransactions.addAll(diffTransactions);
         unUsedTransactions.forEach(this::postTransaction);
 
         // Prepare return value based on usage.
-        // Account for case in which only negative trxs were encountered for a payer.
+        // Account for case in which only negative transactions were encountered for a payer.
+        List<PointsUsageSummary> pointsUsageSummaries = new ArrayList<>();
         pointsUsageByPayer.forEach((key, value) -> {
             if (value.getPointsSpent() > 0) {
                 Long spentPtsToNegative = value.getPointsSpent() * -1;
@@ -129,6 +134,20 @@ public class PointsService {
             }
         });
         return pointsUsageSummaries;
+    }
+
+    public Map<String, Long> getBalances() {
+        Cache balancesCache = cacheManager.getCache(BALANCES_CACHE);
+        Set<Object> allBalancesKeys = getAllKeys(BALANCES_CACHE);
+        Map<String, Long> allBalances = new HashMap<>();
+        allBalancesKeys.forEach(key -> {
+            String payerName = (String) key;
+            Long points = (Long) Optional.ofNullable(balancesCache.get(key))
+                .map(Cache.ValueWrapper::get)
+                .orElse(0L);
+            allBalances.put(payerName, points);
+        });
+        return allBalances;
     }
 
     private List<Transaction> getAllTransactionsSorted(Cache cache, Set<Object> allKeys) {
